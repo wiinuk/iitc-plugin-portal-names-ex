@@ -24,7 +24,7 @@
 import * as MainModule from "./iitc-plugin-portal-names-ex";
 
 (unsafeWindow as WindowForContentScope)[
-    "_iitc-plugin-portal-names-ex-0c44f84f-9750-47b9-b95d-3ac6f5557291"
+    "_iitc-plugin-portal-names-ex-4ca476d5-60f5-44f5-a05d-987aab44d3a9"
 ] = MainModule;
 
 interface PluginInfo {
@@ -63,7 +63,7 @@ function wrapper(plugin_info: PluginInfo) {
     const setup: SetupHook = function setup() {
         const pluginModule =
             window[
-                "_iitc-plugin-portal-names-ex-0c44f84f-9750-47b9-b95d-3ac6f5557291"
+                "_iitc-plugin-portal-names-ex-4ca476d5-60f5-44f5-a05d-987aab44d3a9"
             ];
         if (pluginModule == null) {
             console.error(
