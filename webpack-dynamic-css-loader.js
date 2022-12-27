@@ -1,177 +1,26 @@
-// spell-checker: ignore cacheable
+// spell-checker: ignore cacheable csstools
 // @ts-check
 const schemaUtils = require("schema-utils");
 const fs = require("fs/promises");
 const { createHash } = require("crypto");
 const { SourceMapGenerator } = require("source-map");
-const css = require("css");
-const cssSelector = require("css-selector-parser");
+const tokenizer = require("@csstools/tokenizer");
 
 const loaderName = "Dynamic css loader";
 
-const none = Symbol("none");
 /**
- * @template T
- * @typedef {T | typeof none} Optional
- */
-/**
- * @template T
- * @param {T} defaultValue
- * @param {Optional<T>} optionalValue
- */
-const noneOr = (defaultValue, optionalValue) =>
-    optionalValue === none ? defaultValue : optionalValue;
-
-/**
- * @typedef {Object} TypeToNodeMap
- * @property {css.Stylesheet} stylesheet
- * @property {css.Rule} rule
- * @property {css.Declaration} declaration
- * @property {css.Comment} comment
- * @property {css.Charset} charset
- * @property {css.CustomMedia} custom-media
- * @property {css.Document} document
- * @property {css.FontFace} font-face
- * @property {css.Host} host
- * @property {css.Import} import
- * @property {css.KeyFrames} keyframes
- * @property {css.KeyFrame} keyframe
- * @property {css.Media} media
- * @property {css.Namespace} namespace
- * @property {css.Page} page
- * @property {css.Supports} supports
- */
-
-/**
- * @typedef {css.Rule | css.Comment | css.AtRule} RuleSet
- */
-
-/**
- * @template {keyof TypeToNodeMap} K
- * @param {K} type
- * @param {css.Node} node
- * @returns {node is TypeToNodeMap[K] & { type: K }}
- */
-const is = (type, node) => node.type === type;
-
-/**
+ * @typedef {Object} LineAndCharacter
+ * @property {number} line
+ * @property {number} character
+ *
+ * @typedef {Object} TokenLocation
+ * @property {LineAndCharacter} start
+ * @property {LineAndCharacter} end
+ *
  * @typedef {Object} ClassNameSymbol
  * @property {string} uniqueId
- * @property {Set<css.Node>} declarations
+ * @property {TokenLocation[]} declarations
  */
-
-/**
- * @typedef {Object} ReplacerContext
- * @property {Map<string, ClassNameSymbol>} classNameToSymbol
- * @property {string} cssTextHash
- * @property {css.Node | null} currentRule
- */
-
-/**
- * @template {unknown} T
- * @typedef {(oldValue: T, context: ReplacerContext) => Optional<T>} Replacer
- */
-
-/** @type {never[][]} */
-const newItemsPool = [];
-/**
- * @template T
- * @param {Replacer<T>} itemReplacer
- * @param {T[]} items
- * @param {ReplacerContext} context
- */
-const replaceArray = (itemReplacer, items, context) => {
-    // 配列をキャッシュしてアロケーションを抑制する
-    let hasNewItem = false;
-    /** @type {T[]} */
-    const tempNewItems = newItemsPool.pop() || [];
-    try {
-        for (const item of items) {
-            const newItem = itemReplacer(item, context);
-            tempNewItems.push(
-                newItem !== none ? ((hasNewItem = true), newItem) : item
-            );
-        }
-        if (hasNewItem) {
-            return tempNewItems.slice();
-        }
-        return none;
-    } finally {
-        // プールに返す
-        tempNewItems.length = 0;
-        newItemsPool.push(/** @type {never[]} */ (tempNewItems));
-    }
-};
-/**
- * @template R
- * @template {keyof R} K1
- * @param {R} record
- * @param {K1} key1
- * @param {Replacer<NonNullable<R[K1]>>} field1Replacer
- * @param {ReplacerContext} context
- * @returns {Optional<R>}
- */
-const replaceField1 = (record, key1, field1Replacer, context) => {
-    const field = record?.[key1];
-    if (field == null) {
-        return none;
-    }
-    const newRecord = field1Replacer(field, context);
-    if (newRecord == null) return none;
-
-    return {
-        ...record,
-        [key1]: newRecord,
-    };
-};
-/**
- * @template TRecord
- * @template {keyof TRecord} TKey1
- * @template {keyof TRecord} TKey2
- * @template {keyof TRecord} TKey3
- * @param {TRecord} record
- * @param {TKey1} key1
- * @param {Replacer<NonNullable<TRecord[TKey1]>>} field1Replacer
- * @param {TKey2} key2
- * @param {Replacer<NonNullable<TRecord[TKey2]>>} field2Replacer
- * @param {TKey3} key3
- * @param {Replacer<NonNullable<TRecord[TKey3]>>} field3Replacer
- * @param {ReplacerContext} context
- * @returns {Optional<TRecord>}
- */
-const replaceField3 = (
-    record,
-    key1,
-    field1Replacer,
-    key2,
-    field2Replacer,
-    key3,
-    field3Replacer,
-    context
-) => {
-    const field1 = record[key1];
-    const field2 = record[key2];
-    const field3 = record[key3];
-    const newField1 = field1 != null ? field1Replacer(field1, context) : none;
-    const newField2 = field2 != null ? field2Replacer(field2, context) : none;
-    const newField3 = field3 != null ? field3Replacer(field3, context) : none;
-
-    if (newField1 === none && newField2 === none && newField3 === none) {
-        return none;
-    }
-    return {
-        ...record,
-        [key1]: noneOr(field1, newField1),
-        [key2]: noneOr(field2, newField2),
-        [key3]: noneOr(field3, newField3),
-    };
-};
-
-const selectorParser = new cssSelector.CssSelectorParser()
-    .registerSelectorPseudos("has")
-    .registerNestingOperators(">", "+", "~")
-    .registerAttrEqualityMods("^", "$", "*", "~")
-    .enableSubstitutes();
 
 /**
  * @param {string} source
@@ -182,17 +31,24 @@ const hash = (source) => {
     return sha1.digest("hex");
 };
 
-/** @type {Replacer<string>} */
-const replaceSelectorClassName = (
+/**
+ * @param {Map<string, ClassNameSymbol>} classNameToSymbol
+ * @param {string} className
+ * @param {TokenLocation} declaration
+ * @param {string} cssTextHash
+ */
+const addDeclaration = (
+    classNameToSymbol,
     className,
-    { classNameToSymbol, cssTextHash, currentRule }
+    declaration,
+    cssTextHash
 ) => {
     let symbol = classNameToSymbol.get(className);
     if (symbol == null) {
         /** @type {ClassNameSymbol["declarations"]} */
-        const declarations = new Set();
-        if (currentRule != null) {
-            declarations.add(currentRule);
+        const declarations = [];
+        if (declaration != null) {
+            declarations.push(declaration);
         }
         symbol = {
             uniqueId: `${className}-${hash(`${cssTextHash}-${className}`)}`,
@@ -200,124 +56,119 @@ const replaceSelectorClassName = (
         };
         classNameToSymbol.set(className, symbol);
     } else {
-        if (currentRule != null) {
-            symbol.declarations.add(currentRule);
+        if (declaration != null) {
+            symbol.declarations.push(declaration);
         }
     }
-    return symbol.uniqueId;
+    return symbol;
 };
 
-/** @type {Replacer<cssSelector.Selector>} */
-const replaceSelectorSelector = (selector, context) =>
-    selector.type === "selectors"
-        ? replaceSelectorSelectors(selector, context)
-        : replaceSelectorRuleSet(selector, context);
-
-/** @type {Replacer<cssSelector.RulePseudo>} */
-const replaceSelectorPseudo = (pseudo, context) => {
-    if (pseudo.valueType === "selector") {
-        const value = replaceSelectorSelector(pseudo.value, context);
-        if (value === none) {
-            return none;
+// from tsc
+const carriageReturn = 0x0d;
+const lineFeed = 0x0a;
+const maxAsciiCharacter = 0x7f;
+const lineSeparator = 0x2028;
+const paragraphSeparator = 0x2029;
+/**
+ * @param {number} ch
+ */
+const isLineBreak = (ch) =>
+    ch === lineFeed ||
+    ch === carriageReturn ||
+    ch === lineSeparator ||
+    ch === paragraphSeparator;
+/**
+ * @param {string} text
+ */
+const computeLineStarts = (text) => {
+    /** @type {number[]} */
+    const result = [];
+    let pos = 0;
+    let lineStart = 0;
+    while (pos < text.length) {
+        const ch = text.charCodeAt(pos);
+        pos++;
+        switch (ch) {
+            case carriageReturn:
+                if (text.charCodeAt(pos) === lineFeed) {
+                    pos++;
+                }
+            // falls through
+            case lineFeed:
+                result.push(lineStart);
+                lineStart = pos;
+                break;
+            default:
+                if (ch > maxAsciiCharacter && isLineBreak(ch)) {
+                    result.push(lineStart);
+                    lineStart = pos;
+                }
+                break;
         }
-        return {
-            ...pseudo,
-            value,
-        };
     }
-    return none;
+    result.push(lineStart);
+    return result;
 };
-
-/** @type {Replacer<string[]>} */
-const replaceSelectorClassNames = (classNames, context) =>
-    replaceArray(replaceSelectorClassName, classNames, context);
-
-/** @type {Replacer<cssSelector.RulePseudo[]>} */
-const replaceSelectorPseudos = (pseudos, context) =>
-    replaceArray(replaceSelectorPseudo, pseudos, context);
-
-/** @type {Replacer<cssSelector.Rule>} */
-const replaceSelectorRule = (rule, context) =>
-    replaceField3(
-        rule,
-        "classNames",
-        replaceSelectorClassNames,
-        "pseudos",
-        replaceSelectorPseudos,
-        "rule",
-        replaceSelectorRule,
-        context
-    );
-
-/** @type {Replacer<cssSelector.Selectors>} */
-const replaceSelectorSelectors = (selectors, context) =>
-    replaceField1(selectors, "selectors", replaceSelectorRuleSets, context);
-
-/** @type {Replacer<cssSelector.RuleSet>} */
-const replaceSelectorRuleSet = (ruleSet, context) =>
-    replaceField1(ruleSet, "rule", replaceSelectorRule, context);
-
-/** @type {Replacer<cssSelector.RuleSet[]>} */
-const replaceSelectorRuleSets = (ruleSets, context) =>
-    replaceArray(replaceSelectorRuleSet, ruleSets, context);
-
-/** @type {Replacer<string>} */
-const replaceSelector = (source, context) => {
-    const selector = selectorParser.parse(source);
-    /** @type {Optional<typeof selector>} */
-    let newSelector = none;
-    if (selector.type === "selectors") {
-        newSelector = replaceSelectorSelectors(selector, context);
-    }
-    if (selector.type === "ruleSet") {
-        newSelector = replaceSelectorRuleSet(selector, context);
+/**
+ * @template {boolean | number | string | bigint} T
+ * @param {readonly T[]} array
+ * @param {T} key
+ * @param {number} [offset]
+ */
+const binarySearch = (array, key, offset) => {
+    if (array.length <= 0) {
+        return -1;
     }
 
-    if (newSelector != none) {
-        return selectorParser.render(newSelector);
+    let low = offset || 0;
+    let high = array.length - 1;
+    while (low <= high) {
+        const middle = low + ((high - low) >> 1);
+        const midKey = array[middle];
+        if (midKey < key) {
+            low = middle + 1;
+        } else if (midKey === key) {
+            return middle;
+        } else {
+            high = middle - 1;
+        }
     }
-    return none;
+    return ~low;
 };
-
-/** @type {Replacer<string[]>} */
-const replaceSelectors = (selectors, context) =>
-    replaceArray(replaceSelector, selectors, context);
-
-/** @type {Replacer<css.Rule>} */
-const replaceRule = (rule, context) => {
-    const parentRule = context.currentRule;
-    try {
-        context.currentRule = rule;
-        return replaceField1(rule, "selectors", replaceSelectors, context);
-    } finally {
-        context.currentRule = parentRule;
+/**
+ * @param {readonly number[]} lineStarts
+ * @param {number} position
+ * @param {number} [lowerBound]
+ */
+const computeLineOfPosition = (lineStarts, position, lowerBound) => {
+    let lineNumber = binarySearch(lineStarts, position, lowerBound);
+    if (lineNumber < 0) {
+        lineNumber = ~lineNumber - 1;
     }
+    return lineNumber;
 };
-
-/** @type {Replacer<css.Media>} */
-const replaceMedia = (media, context) =>
-    replaceField1(media, "rules", replaceRules, context);
-
-/** @type {Replacer<RuleSet>} */
-const replaceRuleSet = (rule, context) => {
-    if (is("rule", rule)) {
-        return replaceRule(rule, context);
-    }
-    if (is("media", rule)) {
-        return replaceMedia(rule, context);
-    }
-    return none;
+/**
+ * @param {readonly number[]} lineStarts
+ * @param {number} position
+ */
+const computeLineAndCharacterOfPosition = (lineStarts, position) => {
+    const lineNumber = computeLineOfPosition(lineStarts, position);
+    return {
+        line: lineNumber,
+        character: position - lineStarts[lineNumber],
+    };
 };
-
-/** @type {Replacer<RuleSet[]>} */
-const replaceRules = (rules, context) =>
-    replaceArray(replaceRuleSet, rules, context);
 
 /**
  * @typedef {Object} CssReplaceResult
  * @property {string} newCssText
- * @property {ReplacerContext["classNameToSymbol"]} classNameToSymbol
+ * @property {Map<string, ClassNameSymbol>} classNameToSymbol
  */
+
+const TokenType = Object.freeze({
+    Symbol: 1,
+    Word: 4,
+});
 
 /**
  * @param {string} source
@@ -326,43 +177,75 @@ const replaceRules = (rules, context) =>
  * @returns {CssReplaceResult}
  */
 const replicateCssClassNames = (source, sourcePath, console) => {
-    const sheet = css.parse(source, { silent: true, source: sourcePath });
-    const { stylesheet } = sheet;
+    const cssTextHash = hash(source);
+    /** @type {number[] | null} */
+    let lineStarts = null;
+    /**
+     * @param {number} position
+     */
+    const positionToLineAndCharacter = (position) =>
+        computeLineAndCharacterOfPosition(
+            (lineStarts ??= computeLineStarts(source)),
+            position
+        );
 
-    // エラーがあるなら表示して終了
-    const errors = stylesheet?.parsingErrors ?? [];
-    if (0 < errors.length) {
-        for (const error of errors) {
-            console.error(error.message);
+    /** @type {Map<string, ClassNameSymbol>} */
+    const classNameToSymbol = new Map();
+    let newCssText = "";
+    let sliceStart = 0;
+    let sliceEnd = 0;
+    /**
+     *
+     * @param {tokenizer.CSSToken | null} prevToken
+     * @param {tokenizer.CSSToken} token
+     * @param {tokenizer.CSSToken | null} nextToken
+     */
+    const copyToken = (prevToken, token, nextToken) => {
+        const tokenStart = token.tick;
+        const tokenEnd = nextToken?.tick ?? source.length;
+        if (
+            prevToken?.type === TokenType.Symbol &&
+            prevToken?.data === "." &&
+            token.type === TokenType.Word
+        ) {
+            // class: '.' IDENT
+            const declaration = {
+                start: positionToLineAndCharacter(tokenStart),
+                end: positionToLineAndCharacter(tokenEnd),
+            };
+            const symbol = addDeclaration(
+                classNameToSymbol,
+                token.data,
+                declaration,
+                cssTextHash
+            );
+            newCssText += source.slice(sliceStart, sliceEnd);
+            newCssText += symbol.uniqueId;
+            sliceStart = sliceEnd = tokenEnd;
+        } else {
+            sliceEnd = tokenEnd;
         }
-        return {
-            newCssText: source,
-            classNameToSymbol: new Map(),
-        };
+    };
+    /** @type {tokenizer.CSSToken | null} */
+    let prevToken = null;
+    /** @type {tokenizer.CSSToken | null} */
+    let token = null;
+    for (const nextToken of tokenizer.tokenize(source)) {
+        if (token !== null) {
+            copyToken(prevToken, token, nextToken);
+        }
+        prevToken = token;
+        token = nextToken;
     }
-
-    // 構文木の中の selector を置き換えていく
-    /** @type {ReplacerContext} */
-    const context = {
-        classNameToSymbol: new Map(),
-        cssTextHash: hash(source),
-        currentRule: null,
-    };
-    const newRules = replaceRules(stylesheet?.rules ?? [], context);
-    /** @type {css.Stylesheet} */
-    const newSheet = {
-        ...sheet,
-        stylesheet: {
-            ...stylesheet,
-            rules: newRules !== none ? newRules : [],
-        },
-    };
-
-    // 構文木を文字列化
-    const newCssText = css.stringify(newSheet, { compress: false });
+    if (token != null) {
+        copyToken(prevToken, token, null);
+    }
+    if (sliceStart !== sliceEnd) {
+        newCssText += source.slice(sliceStart, sliceEnd);
+    }
     return {
         newCssText,
-        classNameToSymbol: context.classNameToSymbol,
+        classNameToSymbol,
     };
 };
 
@@ -493,28 +376,28 @@ module.exports = async function (contents, sourceMap, data) {
                     // *.d.ts ファイルにマッピングオブジェクトの型定義を書き込む
                     f.writeLine().write(`    & { readonly `);
                     const line = f.line;
-                    const column = f.column - 1;
+                    const column = f.column;
                     f.write(stringifyTsFieldName(className));
                     f.write(`: string; }`);
 
                     // *.d.ts ファイルの型のフィールド名から *.css ファイルの該当セレクタを含むルールへのマッピングを記録し *.d.ts.map ファイルに書き込む
-                    const cssStart = declaration.position?.start;
-                    const cssLine = cssStart?.line;
-                    const cssColumn = cssStart?.column;
-                    if (cssLine != null && cssColumn != null) {
-                        declarationMap.addMapping({
-                            generated: {
-                                line,
-                                column,
-                            },
-                            source: cssPath,
-                            original: {
-                                line: cssLine,
-                                column: cssColumn - 1,
-                            },
-                            name: className,
-                        });
-                    }
+                    const cssStart = declaration.start;
+                    const cssLine = cssStart.line;
+                    const cssCharacter = cssStart.character;
+                    const mapping = {
+                        generated: {
+                            line,
+                            column,
+                        },
+                        source: cssPath,
+                        original: {
+                            line: cssLine + 1,
+                            column: cssCharacter,
+                        },
+                        name: className,
+                    };
+                    console.info(mapping);
+                    declarationMap.addMapping(mapping);
                 }
             }
         }
