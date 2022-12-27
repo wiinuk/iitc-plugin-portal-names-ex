@@ -384,7 +384,7 @@ module.exports = async function (contents, sourceMap, data) {
                     const cssStart = declaration.start;
                     const cssLine = cssStart.line;
                     const cssCharacter = cssStart.character;
-                    const mapping = {
+                    declarationMap.addMapping({
                         generated: {
                             line,
                             column,
@@ -395,9 +395,7 @@ module.exports = async function (contents, sourceMap, data) {
                             column: cssCharacter,
                         },
                         name: className,
-                    };
-                    console.info(mapping);
-                    declarationMap.addMapping(mapping);
+                    });
                 }
             }
         }
