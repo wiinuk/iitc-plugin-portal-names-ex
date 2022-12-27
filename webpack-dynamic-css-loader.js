@@ -189,9 +189,14 @@ const replaceSelectorClassName = (
 ) => {
     let symbol = classNameToSymbol.get(className);
     if (symbol == null) {
+        /** @type {ClassNameSymbol["declarations"]} */
+        const declarations = new Set();
+        if (currentRule != null) {
+            declarations.add(currentRule);
+        }
         symbol = {
             uniqueId: `${className}-${hash(`${cssTextHash}-${className}`)}`,
-            declarations: new Set(currentRule == null ? [] : [currentRule]),
+            declarations,
         };
         classNameToSymbol.set(className, symbol);
     } else {
@@ -455,6 +460,17 @@ module.exports = async function (contents, sourceMap, data) {
     const declarationMap = new SourceMapGenerator({
         file: declarationPath,
     });
+    declarationMap.addMapping({
+        generated: {
+            line: 1,
+            column: 0,
+        },
+        source: cssPath,
+        original: {
+            line: 1,
+            column: 0,
+        },
+    });
     const declarationFile = new SourceFileBuilder();
     /** @type {Record<string, string>} */
     const classNameToId = Object.create(null);
@@ -477,7 +493,7 @@ module.exports = async function (contents, sourceMap, data) {
                     // *.d.ts ファイルにマッピングオブジェクトの型定義を書き込む
                     f.writeLine().write(`    & { readonly `);
                     const line = f.line;
-                    const column = f.column;
+                    const column = f.column - 1;
                     f.write(stringifyTsFieldName(className));
                     f.write(`: string; }`);
 
