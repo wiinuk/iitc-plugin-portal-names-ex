@@ -1,8 +1,8 @@
 //@ts-check
 const UserScriptPlugin = require("./webpack-user-script-plugin");
+const TypedCssModulePlugin = require("./webpack-typed-css-module-plugin");
 const { name: packageName } = require("./package.json");
 const webpack = require("webpack");
-const path = require("path");
 
 const entry = `./source/${packageName}.user.ts`;
 
@@ -15,21 +15,13 @@ const config = {
             "process.browser": true,
         }),
         UserScriptPlugin,
+        new TypedCssModulePlugin(),
     ],
     module: {
         rules: [
             {
                 test: /\.tsx?$/,
                 use: "ts-loader",
-            },
-            {
-                test: /\.css$/,
-                use: [
-                    {
-                        loader: path.resolve("./webpack-dynamic-css-loader.js"),
-                        options: {},
-                    },
-                ],
             },
         ],
     },
