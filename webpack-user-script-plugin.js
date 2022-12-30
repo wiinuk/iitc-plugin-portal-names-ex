@@ -1,5 +1,5 @@
 //@ts-check
-const Path = require("path");
+const Path = require("node:path");
 const { ConcatSource } = require("webpack-sources");
 
 const PluginName = "WebpackUserScriptPlugin";
