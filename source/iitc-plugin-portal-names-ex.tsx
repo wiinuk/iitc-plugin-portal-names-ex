@@ -15,7 +15,7 @@ const NAME_WIDTH = 80;
 const NAME_HEIGHT = 23;
 
 type Guid = string;
-const labelLayers: Record<Guid, L.Marker> = {};
+const labelLayers = new Map<Guid, L.Marker>();
 let labelLayerGroup: L.LayerGroup<L.Marker>;
 
 let window: Window & typeof globalThis;
@@ -51,15 +51,15 @@ async function asyncMain() {
 }
 
 function removeLabel(guid: string) {
-    const previousLayer = labelLayers[guid];
+    const previousLayer = labelLayers.get(guid);
     if (previousLayer) {
         labelLayerGroup.removeLayer(previousLayer);
-        delete labelLayers[guid];
+        labelLayers.delete(guid);
     }
 }
 
 function addLabel(guid: string, latLng: L.LatLngExpression) {
-    const previousLayer = labelLayers[guid];
+    const previousLayer = labelLayers.get(guid);
     if (!previousLayer) {
         const d = window.portals[guid]!.options.data;
         const portalName = d.title;
@@ -72,13 +72,13 @@ function addLabel(guid: string, latLng: L.LatLngExpression) {
                 html: portalName,
             }),
         });
-        labelLayers[guid] = label;
+        labelLayers.set(guid, label);
         labelLayerGroup.addLayer(label);
     }
 }
 
 function clearAllPortalLabels() {
-    for (const guid in labelLayers) {
+    for (const guid of labelLayers.keys()) {
         removeLabel(guid);
     }
 }
@@ -89,7 +89,7 @@ function updatePortalLabels() {
         return;
     }
 
-    const portalPoints: Record<string, L.Point> = {};
+    const portalPoints = new Map<string, L.Point>();
 
     for (const guid in window.portals) {
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
@@ -97,16 +97,13 @@ function updatePortalLabels() {
         if (p._map && p.options.data.title) {
             // 地図に追加されたポータルで、タイトルがあるもののみを対象とする
             const point = map.project(p.getLatLng());
-            portalPoints[guid] = point;
+            portalPoints.set(guid, point);
         }
     }
 
     // 交差点のテストを効率的に行うために、ラベルサイズに基づいてポータルをバケットにグループ化する。
-    const buckets: Record<string, Record<string, unknown>> = {};
-    for (const guid in portalPoints) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        const point = portalPoints[guid]!;
-
+    const buckets = new Map<string, Set<string>>();
+    portalPoints.forEach((point, guid) => {
         const bucketId = L.point(
             Math.floor(point.x / (NAME_WIDTH * 2)),
             Math.floor(point.y / NAME_HEIGHT)
@@ -118,34 +115,34 @@ function updatePortalLabels() {
             bucketId.add(L.point(0, 1)),
             bucketId.add(L.point(1, 1)),
         ];
-        for (const i in bucketIds) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            const b = bucketIds[i]!.toString();
-            if (!buckets[b]) buckets[b] = {};
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            buckets[b]![guid] = true;
+        for (const bucketId of bucketIds) {
+            const b = bucketId.toString();
+            let bucket = buckets.get(b);
+            if (!bucket) {
+                buckets.set(b, (bucket = new Set()));
+            }
+            bucket.add(guid);
         }
-    }
+    });
 
-    const coveredPortals: Record<string, boolean> = {};
+    const coveredPortals = new Set<string>();
 
-    for (const bucket in buckets) {
-        const bucketGuids = buckets[bucket];
-        for (const guid in bucketGuids) {
-            const point = portalPoints[guid]!;
+    for (const bucketGuids of buckets.values()) {
+        for (const guid of bucketGuids) {
+            const point = portalPoints.get(guid)!;
             // テストに使用した境界は、ポータル名マーカの2倍の幅です。これは、2つの異なるポータルテキスト間で左右の重なりがないようにするためです。
             const largeBounds = L.bounds(
                 point.subtract(L.point(NAME_WIDTH, 0)),
                 point.add(L.point(NAME_WIDTH, NAME_HEIGHT))
             );
 
-            for (const otherGuid in bucketGuids) {
+            for (const otherGuid of bucketGuids) {
                 if (guid != otherGuid) {
-                    const otherPoint = portalPoints[otherGuid]!;
+                    const otherPoint = portalPoints.get(otherGuid)!;
 
                     if (largeBounds.contains(otherPoint)) {
                         // 別のポータルは、このポータルの名前の矩形内にある - だから、このポータルの名前はない
-                        coveredPortals[guid] = true;
+                        coveredPortals.add(guid);
                         break;
                     }
                 }
@@ -153,19 +150,19 @@ function updatePortalLabels() {
         }
     }
 
-    for (const guid in coveredPortals) {
-        delete portalPoints[guid];
+    for (const guid of coveredPortals) {
+        portalPoints.delete(guid);
     }
 
     // 不要なものを削除し
-    for (const guid in labelLayers) {
-        if (!(guid in portalPoints)) {
+    for (const guid of labelLayers.keys()) {
+        if (!portalPoints.has(guid)) {
             removeLabel(guid);
         }
     }
 
     // 必要なものを追加する
-    for (const guid in portalPoints) {
+    for (const guid of portalPoints.keys()) {
         addLabel(guid, window.portals[guid]!.getLatLng());
     }
 }
