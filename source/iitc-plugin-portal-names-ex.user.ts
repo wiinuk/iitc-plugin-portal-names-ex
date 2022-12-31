@@ -2,7 +2,7 @@
 // @id           iitc-plugin-portal-names-ex@wiinuk
 // @name         IITC plugin: Portal Names Ex
 // @category     Controls
-// @namespace    https://github.com/wiinuk/iitc-plugin-portal-names-ex
+// @namespace    https://github.com/IITC-CE/ingress-intel-total-conversion
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-names-ex/raw/master/iitc-plugin-portal-names-ex.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-names-ex/raw/master/iitc-plugin-portal-names-ex.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-names-ex
