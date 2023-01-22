@@ -56,15 +56,43 @@ function addHook(
     callback: (data: unknown) => false | void
 ): void;
 
-interface IITCPortalInfo {
+interface IITCPortalInfo extends L.CircleMarker {
     _map?: unknown;
     options: IITCPortalOptions;
     getLatLng(): L.LatLng;
 }
-interface IITCPortalOptions {
+interface IITCPortalOptions extends L.PathOptions {
     data: IITCPortalData;
 }
 interface IITCPortalData {
+    /**
+     * @example `null`
+     */
+    artifactBrief?: unknown;
+    /**
+     * 0…100。プロパティーが無い場合もある。
+     */
+    health?: number;
+    /** @example `"http://lh3.googleusercontent.com/…"` */
+    image?: string;
+    /** @example `35689885` */
+    latE6?: number;
+    /** @example `1` */
+    level?: number;
+    /** @example `139765518` */
+    lngE6?: number;
+    /** @example `true` */
+    mission?: boolean;
+    /** @example `true` */
+    mission50plus?: boolean;
+    /** @example `["sc5_p"]` `["bb_s"]` */
+    ornaments?: string[];
+    /** @example `1` */
+    resCount?: number;
+    team?: "E" | "R" | "N";
+    /** Date.now の戻り値。new Date(timestamp) で日時取得 */
+    timestamp?: number;
+    /** ポータルのタイトル */
     title?: string;
 }
 var portals: Record<string, IITCPortalInfo>;
