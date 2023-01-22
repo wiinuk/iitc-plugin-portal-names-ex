@@ -89,7 +89,7 @@ function setPortalPoints(
     portalPoints: ReadonlyMap<PortalId, PortalWithPoint>,
     progress?: Progress<UpdateProgress>
 ) {
-    progress?.("update layers", "start");
+    progress?.("update layers", "begin");
     // 不要なものを削除し
     for (const guid of labelLayers.keys()) {
         if (!portalPoints.has(guid)) {
@@ -109,7 +109,7 @@ interface PortalWithPoint {
     portal: IITCPortalInfo;
 }
 type UpdateProgress =
-    | ["update layers" | "collect portals" | "filter portals", "start" | "end"]
+    | ["update layers" | "collect portals" | "filter portals", "begin" | "end"]
     | ["portal count", number];
 
 type UpdatePortalLabelsOptions = AsyncOptions<UpdateProgress>;
@@ -123,7 +123,7 @@ async function updatePortalLabels(options?: UpdatePortalLabelsOptions) {
         return;
     }
 
-    progress?.("collect portals", "start");
+    progress?.("collect portals", "begin");
     const portalPoints = new Map<PortalId, PortalWithPoint>();
     for (const guid in window.portals) {
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
@@ -139,7 +139,7 @@ async function updatePortalLabels(options?: UpdatePortalLabelsOptions) {
 
     signal?.throwIfAborted();
 
-    progress?.("filter portals", "start");
+    progress?.("filter portals", "begin");
     // 交差点のテストを効率的に行うために、ラベルサイズに基づいてポータルをバケットにグループ化する。
     const buckets = new Map<ComparablePoint, Map<PortalId, PortalWithPoint>>();
     for (const [guid, portal] of portalPoints) {
@@ -207,7 +207,7 @@ const reportUpdateProgress: (...args: UpdateProgress) => void = (
     arg1,
     ...argTail
 ) => {
-    if (arg1 === "start") {
+    if (arg1 === "begin") {
         console.time(arg0);
     } else if (arg1 === "end") {
         console.timeEnd(arg0);
