@@ -3,12 +3,12 @@
 // @id           iitc-plugin-portal-names-ex@wiinuk
 // @name         IITC plugin: Portal Names Ex
 // @category     Controls
-// @namespace    https://github.com/wiinuk/iitc-plugin-portal-names-ex
+// @namespace    https://github.com/IITC-CE/ingress-intel-total-conversion
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-names-ex/raw/master/iitc-plugin-portal-names-ex.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-names-ex/raw/master/iitc-plugin-portal-names-ex.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-names-ex
-// @version      0.2.0
-// @description  Add the ability to move to specified coordinates.
+// @version      0.3.0
+// @description  Display the name of the portal on the map
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
 // @include      http://*.ingress.com/intel*
@@ -154,6 +154,9 @@ function sleep(milliseconds, option) {
         signal === null || signal === void 0 ? void 0 : signal.addEventListener("abort", onAbort);
     });
 }
+function microYield() {
+    return Promise.resolve();
+}
 function cancelToReject(promise, onCancel = ignore) {
     return promise.catch((e) => {
         if (e instanceof Error && e.name === "AbortError") {
@@ -291,11 +294,9 @@ function parseCssColor(cssColor, result = { r: 0, g: 0, b: 0, a: 0 }) {
 }
 
 ;// CONCATENATED MODULE: ./source/styles.module.css
-const cssText = ".button-980918109b8616e40684545e417341f9a4b85e6f {\r\n    position: fixed;\r\n    z-index: 9999;\r\n    left: 0;\r\n    top: 0;\r\n    border: solid 1px red;\r\n    background-color: aquamarine;\r\n    border-radius: 91px;\r\n    padding: 100px;\r\n}\r\n.article-fad193daa10738b26288a39bfaf42811665b4a44.button-980918109b8616e40684545e417341f9a4b85e6f {\r\n    position: relative;\r\n}\r\n.classN-4cd2a93a9cdbf47cc76afe87c06604965c948318 + .button-980918109b8616e40684545e417341f9a4b85e6f {\r\n    position: relative;\r\n}\r\n";
+const cssText = ".name-icon-92bfd34773a04de7e8a2380986cff971b2315310 {\r\n    color: #FFFFBB;\r\n    font-size: 11px;\r\n    line-height: 12px;\r\n    text-align: center;\r\n    padding: 2px;\r\n    overflow: hidden;\r\n    text-shadow: 1px 1px #000, 1px -1px #000, -1px 1px #000, -1px -1px #000, 0 0 5px #000;\r\n}\r\n";
 /* harmony default export */ const styles_module = ({
-    button: "button-980918109b8616e40684545e417341f9a4b85e6f",
-    article: "article-fad193daa10738b26288a39bfaf42811665b4a44",
-    classN: "classN-4cd2a93a9cdbf47cc76afe87c06604965c948318",
+    "name-icon": "name-icon-92bfd34773a04de7e8a2380986cff971b2315310",
 });
 
 ;// CONCATENATED MODULE: ./source/iitc-plugin-portal-names-ex.tsx
@@ -308,26 +309,175 @@ var iitc_plugin_portal_names_ex_awaiter = (undefined && undefined.__awaiter) || 
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+// spell-checker: ignore zoomend overlayadd overlayremove guids
 
 
 
 function handleAsyncError(promise) {
     promise.catch((error) => console.error(error));
 }
+function main() {
+    handleAsyncError(asyncMain());
+}
+const NAME_WIDTH = 80;
+const NAME_HEIGHT = 23;
+const labelLayers = new Map();
+let labelLayerGroup;
+let iitc_plugin_portal_names_ex_window;
 function asyncMain() {
     return iitc_plugin_portal_names_ex_awaiter(this, void 0, void 0, function* () {
         const { L = standard_extensions_error `leaflet を先に読み込んでください`, map = standard_extensions_error `デフォルトマップがありません`, } = unsafeWindow;
+        iitc_plugin_portal_names_ex_window = unsafeWindow;
         yield waitElementLoaded();
         L.Icon.Default.imagePath = `https://unpkg.com/leaflet@${L.version}/dist/images/`;
         addStyle(cssText);
-        const e = document.createElement("div");
-        e.className = styles_module.button;
-        e.innerText = "button?";
-        document.body.append(e);
+        labelLayerGroup = new L.LayerGroup();
+        iitc_plugin_portal_names_ex_window.addLayerGroup("Portal Names Ex", labelLayerGroup, true);
+        iitc_plugin_portal_names_ex_window.addHook("requestFinished", () => void setTimeout(() => delayedUpdatePortalLabels(3.0), 1));
+        iitc_plugin_portal_names_ex_window.addHook("mapDataRefreshEnd", () => delayedUpdatePortalLabels(0.5));
+        map.on("overlayadd overlayremove", () => setTimeout(() => delayedUpdatePortalLabels(1.0), 1));
+        map.on("zoomend", clearAllPortalLabels);
     });
 }
-function main() {
-    handleAsyncError(asyncMain());
+function removeLabel(guid) {
+    const previousLayer = labelLayers.get(guid);
+    if (previousLayer) {
+        labelLayerGroup.removeLayer(previousLayer);
+        labelLayers.delete(guid);
+    }
+}
+function addLabel(guid, portal) {
+    const previousLayer = labelLayers.get(guid);
+    if (!previousLayer) {
+        const portalName = portal.options.data.title;
+        const label = L.marker(portal.getLatLng(), {
+            icon: L.divIcon({
+                className: styles_module["name-icon"],
+                iconAnchor: [NAME_WIDTH / 2, 0],
+                iconSize: [NAME_WIDTH, NAME_HEIGHT],
+                html: portalName,
+            }),
+        });
+        labelLayers.set(guid, label);
+        labelLayerGroup.addLayer(label);
+        // label のプライベートフィールドを取得
+        // TODO:
+        if ("_icon" in label && label._icon instanceof HTMLElement) {
+            // タイトルをクリックしたときポータルを選択する
+            label._icon.addEventListener("click", () => { var _a; return (_a = iitc_plugin_portal_names_ex_window.portals[guid]) === null || _a === void 0 ? void 0 : _a.fireEvent("click"); });
+        }
+    }
+}
+function clearAllPortalLabels() {
+    for (const guid of labelLayers.keys()) {
+        removeLabel(guid);
+    }
+}
+function setPortalPoints(portalPoints, progress) {
+    progress === null || progress === void 0 ? void 0 : progress("update layers", "begin");
+    // 不要なものを削除し
+    for (const guid of labelLayers.keys()) {
+        if (!portalPoints.has(guid)) {
+            removeLabel(guid);
+        }
+    }
+    // 必要なものを追加する
+    portalPoints.forEach(({ portal }, guid) => {
+        addLabel(guid, portal);
+    });
+    progress === null || progress === void 0 ? void 0 : progress("update layers", "end");
+}
+function updatePortalLabels(options) {
+    return iitc_plugin_portal_names_ex_awaiter(this, void 0, void 0, function* () {
+        const signal = options === null || options === void 0 ? void 0 : options.signal;
+        const progress = options === null || options === void 0 ? void 0 : options.progress;
+        // レイヤーを切り替えるたびに呼び出されるので、レイヤーがオフのときにやっても意味がない
+        if (!map.hasLayer(labelLayerGroup)) {
+            return;
+        }
+        progress === null || progress === void 0 ? void 0 : progress("collect portals", "begin");
+        const portalPoints = new Map();
+        for (const guid in iitc_plugin_portal_names_ex_window.portals) {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const portal = iitc_plugin_portal_names_ex_window.portals[guid];
+            if (portal._map && portal.options.data.title) {
+                // 地図に追加されたポータルで、タイトルがあるもののみを対象とする
+                const point = map.project(portal.getLatLng());
+                portalPoints.set(guid, { point, portal });
+            }
+        }
+        progress === null || progress === void 0 ? void 0 : progress("collect portals", "end");
+        progress === null || progress === void 0 ? void 0 : progress("portal count", portalPoints.size);
+        signal === null || signal === void 0 ? void 0 : signal.throwIfAborted();
+        progress === null || progress === void 0 ? void 0 : progress("filter portals", "begin");
+        // 交差点のテストを効率的に行うために、ラベルサイズに基づいてポータルをバケットにグループ化する。
+        const buckets = new Map();
+        for (const [guid, portal] of portalPoints) {
+            yield microYield();
+            signal === null || signal === void 0 ? void 0 : signal.throwIfAborted();
+            const bucketId = L.point(Math.floor(portal.point.x / (NAME_WIDTH * 2)), Math.floor(portal.point.y / NAME_HEIGHT));
+            // この方法では、重複をテストするときに、特定のポータルを囲む8つのバケットすべてをテストする必要はなく、そのポータルが入っているバケットそのものだけをテストします。
+            const bucketIds = [
+                bucketId,
+                bucketId.add(L.point(1, 0)),
+                bucketId.add(L.point(0, 1)),
+                bucketId.add(L.point(1, 1)),
+            ];
+            for (const bucketId of bucketIds) {
+                const b = bucketId.toString();
+                let bucket = buckets.get(b);
+                if (!bucket) {
+                    buckets.set(b, (bucket = new Map()));
+                }
+                bucket.set(guid, portal);
+            }
+        }
+        const coveredPortals = new Set();
+        for (const bucketGuids of buckets.values()) {
+            yield microYield();
+            signal === null || signal === void 0 ? void 0 : signal.throwIfAborted();
+            for (const [guid, { point }] of bucketGuids) {
+                // テストに使用した境界は、ポータル名マーカの2倍の幅です。これは、2つの異なるポータルテキスト間で左右の重なりがないようにするためです。
+                const largeBounds = L.bounds(point.subtract(L.point(NAME_WIDTH, 0)), point.add(L.point(NAME_WIDTH, NAME_HEIGHT)));
+                for (const [otherGuid, { point: otherPoint }] of bucketGuids) {
+                    if (guid !== otherGuid) {
+                        if (largeBounds.contains(otherPoint)) {
+                            // 別のポータルは、このポータルの名前の矩形内にある - だから、このポータルの名前はない
+                            coveredPortals.add(guid);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        for (const guid of coveredPortals) {
+            portalPoints.delete(guid);
+        }
+        progress === null || progress === void 0 ? void 0 : progress("filter portals", "end");
+        progress === null || progress === void 0 ? void 0 : progress("portal count", portalPoints.size);
+        yield microYield();
+        signal === null || signal === void 0 ? void 0 : signal.throwIfAborted();
+        setPortalPoints(portalPoints);
+    });
+}
+const reportUpdateProgress = (arg0, arg1, ...argTail) => {
+    if (arg1 === "begin") {
+        console.time(arg0);
+    }
+    else if (arg1 === "end") {
+        console.timeEnd(arg0);
+    }
+    else {
+        console.log(arg0, arg1, ...argTail);
+    }
+};
+const portalLabelsUpdateScope = createAsyncCancelScope(handleAsyncError);
+// ポータルマーカーがたくさん表示されている場合、その計算には時間がかかるので、短いタイマーで計算するようにしました。
+function delayedUpdatePortalLabels(wait) {
+    portalLabelsUpdateScope((signal) => iitc_plugin_portal_names_ex_awaiter(this, void 0, void 0, function* () {
+        yield sleep(wait * 1000, { signal });
+        yield updatePortalLabels({ signal, progress: reportUpdateProgress });
+    }));
 }
 
 ;// CONCATENATED MODULE: ./source/iitc-plugin-portal-names-ex.user.ts

@@ -6,8 +6,8 @@
 // @downloadURL  https://github.com/wiinuk/iitc-plugin-portal-names-ex/raw/master/iitc-plugin-portal-names-ex.user.js
 // @updateURL    https://github.com/wiinuk/iitc-plugin-portal-names-ex/raw/master/iitc-plugin-portal-names-ex.user.js
 // @homepageURL  https://github.com/wiinuk/iitc-plugin-portal-names-ex
-// @version      0.2.0
-// @description  Add the ability to move to specified coordinates.
+// @version      0.3.0
+// @description  Display the name of the portal on the map
 // @author       Wiinuk
 // @include      https://*.ingress.com/intel*
 // @include      http://*.ingress.com/intel*
