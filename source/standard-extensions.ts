@@ -26,8 +26,8 @@ export function ignore(..._args: unknown[]): void {
     /* 引数を無視する関数 */
 }
 
-export interface Progress<T> {
-    (value: T): void;
+export interface Progress<TArgs extends unknown[]> {
+    (...args: TArgs): void;
 }
 interface ProgressReporter {
     next(message?: string): void;
@@ -36,7 +36,7 @@ interface ProgressReporter {
 let ignoreReporterCache: ProgressReporter | undefined;
 
 export function createProgressReporter(
-    progress: Progress<ProgressEvent> | undefined,
+    progress: Progress<[ProgressEvent]> | undefined,
     total: number
 ): ProgressReporter {
     class MessagedProgressEvent extends ProgressEvent {
@@ -76,9 +76,11 @@ export function createProgressReporter(
         },
     };
 }
-export interface AsyncOptions {
+export interface AsyncOptions<
+    TProgressArgs extends unknown[] = [ProgressEvent]
+> {
     signal?: AbortSignal;
-    progress?: Progress<ProgressEvent>;
+    progress?: Progress<TProgressArgs>;
 }
 class AbortError extends Error {
     override name = "AbortError";
@@ -117,6 +119,10 @@ export function sleep(milliseconds: number, option?: { signal?: AbortSignal }) {
         }, milliseconds);
         signal?.addEventListener("abort", onAbort);
     });
+}
+
+export function microYield() {
+    return Promise.resolve();
 }
 
 export function cancelToReject<T>(
