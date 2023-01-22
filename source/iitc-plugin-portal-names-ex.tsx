@@ -202,17 +202,17 @@ async function updatePortalLabels(options?: UpdatePortalLabelsOptions) {
     setPortalPoints(portalPoints);
 }
 
-const updateReporter: (...args: UpdateProgress) => void = (
+const reportUpdateProgress: (...args: UpdateProgress) => void = (
     arg0,
     arg1,
-    ...args
+    ...argTail
 ) => {
     if (arg1 === "start") {
         console.time(arg0);
-    } else if (args[1] === "end") {
+    } else if (arg1 === "end") {
         console.timeEnd(arg0);
     } else {
-        console.log(arg0, arg1, ...args);
+        console.log(arg0, arg1, ...argTail);
     }
 };
 
@@ -221,6 +221,6 @@ const portalLabelsUpdateScope = createAsyncCancelScope(handleAsyncError);
 function delayedUpdatePortalLabels(wait: seconds) {
     portalLabelsUpdateScope(async (signal) => {
         await sleep(wait * 1000, { signal });
-        await updatePortalLabels({ signal, progress: updateReporter });
+        await updatePortalLabels({ signal, progress: reportUpdateProgress });
     });
 }
