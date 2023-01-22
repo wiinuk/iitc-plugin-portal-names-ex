@@ -76,6 +76,15 @@ function addLabel(guid: PortalId, portal: IITCPortalInfo) {
         });
         labelLayers.set(guid, label);
         labelLayerGroup.addLayer(label);
+
+        // label のプライベートフィールドを取得
+        // TODO:
+        if ("_icon" in label && label._icon instanceof HTMLElement) {
+            // タイトルをクリックしたときポータルを選択する
+            label._icon.addEventListener("click", () =>
+                window.portals[guid]?.fireEvent("click")
+            );
+        }
     }
 }
 
