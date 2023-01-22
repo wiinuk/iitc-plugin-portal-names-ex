@@ -123,6 +123,15 @@ type UpdateProgress =
 
 type UpdatePortalLabelsOptions = AsyncOptions<UpdateProgress>;
 
+function comparePortal(portal1: IITCPortalInfo, portal2: IITCPortalInfo) {
+    const t1 = portal1.options.data.timestamp;
+    const t2 = portal2.options.data.timestamp;
+
+    if (t1 === undefined && t2 === undefined) return 0;
+    if (t1 === undefined) return -1;
+    if (t2 === undefined) return 1;
+    return t1 - t2;
+}
 async function updatePortalLabels(options?: UpdatePortalLabelsOptions) {
     const signal = options?.signal;
     const progress = options?.progress;
@@ -181,18 +190,23 @@ async function updatePortalLabels(options?: UpdatePortalLabelsOptions) {
         await doOtherTasks();
         signal?.throwIfAborted();
 
-        for (const [guid, { point }] of bucketGuids) {
+        for (const [guid, { portal, point }] of bucketGuids) {
             // テストに使用した境界は、ポータル名マーカの2倍の幅です。これは、2つの異なるポータルテキスト間で左右の重なりがないようにするためです。
             const largeBounds = L.bounds(
                 point.subtract(L.point(NAME_WIDTH, 0)),
                 point.add(L.point(NAME_WIDTH, NAME_HEIGHT))
             );
 
-            for (const [otherGuid, { point: otherPoint }] of bucketGuids) {
+            for (const [
+                otherGuid,
+                { portal: otherPortal, point: otherPoint },
+            ] of bucketGuids) {
                 if (guid !== otherGuid) {
                     if (largeBounds.contains(otherPoint)) {
                         // 別のポータルは、このポータルの名前の矩形内にある - だから、このポータルの名前はない
-                        coveredPortals.add(guid);
+                        const c = comparePortal(portal, otherPortal);
+                        const removePortal = c === 0 ? guid < otherGuid : 0 < c;
+                        coveredPortals.add(removePortal ? guid : otherGuid);
                         break;
                     }
                 }
