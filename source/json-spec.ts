@@ -427,7 +427,9 @@ class LiteralSpec<T extends LiteralKind> extends Spec<T> {
         super();
     }
     override get _internal_typeExpression() {
-        return JSON.stringify(this.imitation);
+        return this.imitation === undefined
+            ? "undefined"
+            : JSON.stringify(this.imitation);
     }
     override _internal_typeExpressionPrecedence = Precedence.Primary;
     override _internal_validateCore(value: unknown, path: MutableObjectPath) {
