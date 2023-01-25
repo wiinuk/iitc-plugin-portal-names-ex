@@ -148,43 +148,45 @@ function isNoAssign(declaration, usages) {
 }
 
 /**
- * @param {ts.Node} node
- * @returns {ts.Node | undefined}
- */
-function findImpureExpression(node) {
-    if (
-        ts.isLiteralExpression(node) ||
-        ts.isIdentifier(node) ||
-        ts.isFunctionExpression(node) ||
-        ts.isArrowFunction(node)
-    ) {
-        return;
-    }
-    if (
-        ts.isObjectLiteralExpression(node) ||
-        ts.isArrayLiteralExpression(node) ||
-        ts.isVoidExpression(node) ||
-        ts.isClassExpression(node) ||
-        ts.isPrefixUnaryExpression(node) ||
-        ts.isPostfixUnaryExpression(node) ||
-        (ts.isBinaryExpression(node) &&
-            !isBinaryAssignmentOperator(node.operatorToken.kind)) ||
-        ts.isTypeOfExpression(node) ||
-        ts.isTemplateExpression(node) ||
-        ts.isCommaListExpression(node) ||
-        ts.isConditionalExpression(node) ||
-        ts.isParenthesizedExpression(node)
-    ) {
-        return ts.forEachChild(node, findImpureExpression);
-    }
-    return node;
-}
-
-/**
  * @param {ts.Expression} expression
  */
 function isPure(expression) {
-    return findImpureExpression(expression) === undefined;
+    /**
+     * @param {ts.Node} node
+     * @returns {ts.Expression | undefined}
+     */
+    function findImpureExpressionInExpressionParts(node) {
+        if (
+            ts.isLiteralExpression(node) ||
+            ts.isIdentifier(node) ||
+            ts.isFunctionExpression(node) ||
+            ts.isArrowFunction(node)
+        ) {
+            return;
+        }
+        if (
+            ts.isObjectLiteralExpression(node) ||
+            ts.isArrayLiteralExpression(node) ||
+            ts.isVoidExpression(node) ||
+            // TODO: 副作用があるかもしれないのは heritageClauses と static メンバーのみ
+            ts.isClassExpression(node) ||
+            ts.isPrefixUnaryExpression(node) ||
+            ts.isPostfixUnaryExpression(node) ||
+            (ts.isBinaryExpression(node) &&
+                !isBinaryAssignmentOperator(node.operatorToken.kind)) ||
+            ts.isTypeOfExpression(node) ||
+            ts.isTemplateExpression(node) ||
+            ts.isCommaListExpression(node) ||
+            ts.isConditionalExpression(node) ||
+            ts.isParenthesizedExpression(node) ||
+            // `a + b` 内の `+` や、`{ f: … }` の `f: …` など
+            !tsutils.isExpression(node)
+        ) {
+            return ts.forEachChild(node, findImpureExpressionInExpressionParts);
+        }
+        return node;
+    }
+    return findImpureExpressionInExpressionParts(expression) === undefined;
 }
 
 /**
