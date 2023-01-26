@@ -207,8 +207,9 @@ function getUsedDeclarations(sourceFile) {
             ts.isVoidExpression(node) ||
             // TODO: heritageClauses と static メンバーのみチェックする
             ts.isClassExpression(node) ||
-            ts.isPrefixUnaryExpression(node) ||
-            ts.isPostfixUnaryExpression(node) ||
+            (ts.isPrefixUnaryExpression(node) &&
+                (node.operator === ts.SyntaxKind.PlusToken ||
+                    node.operator === ts.SyntaxKind.MinusToken)) ||
             (ts.isBinaryExpression(node) &&
                 !isBinaryAssignmentOperator(node.operatorToken.kind)) ||
             ts.isTypeOfExpression(node) ||
