@@ -106,47 +106,24 @@ function isBinaryAssignmentOperator(kind) {
 }
 
 /**
- * `--`, `+=`, `||=` など
  * @param {ts.Node} node
  */
-function isVariableUpdateExpression(node) {
+function isLiteralExpression(node) {
+    function _typeTest() {
+        () => {
+            /** @type {ts.LiteralExpression} */
+            //@ts-expect-error
+            let t = ts.factory.createTrue();
+            //@ts-expect-error
+            t = ts.factory.createNull();
+        };
+    }
     return (
-        ts.isPostfixUnaryExpression(node) ||
-        ts.isPrefixUnaryExpression(node) ||
-        (ts.isBinaryExpression(node) &&
-            isBinaryAssignmentOperator(node.operatorToken.kind))
+        ts.isLiteralExpression(node) ||
+        tsutils.isNullLiteral(node) ||
+        tsutils.isBooleanLiteral(node)
     );
 }
-/**
- * @param {ts.Identifier} declaration
- * @param {ReadonlyMap<ts.Identifier, tsutils.VariableInfo>} usages
- */
-function isNoAssign(declaration, usages) {
-    // `const …` なら代入できない
-    if (
-        ts.isVariableDeclaration(declaration.parent) &&
-        ts.isVariableDeclarationList(declaration.parent.parent) &&
-        tsutils.getVariableDeclarationKind(declaration.parent.parent) ===
-            tsutils.VariableDeclarationKind.Const
-    ) {
-        return true;
-    }
-
-    // 変数のすべての使用箇所が更新式かチェック
-    const usage = usages.get(declaration);
-    if (!usage) {
-        return false;
-    }
-    for (const { location } of usage.uses) {
-        const { parent } = location;
-        if (isVariableUpdateExpression(parent)) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 /**
  * @param {ts.Expression} expression
  */
@@ -157,8 +134,10 @@ function isPure(expression) {
      */
     function findImpureExpressionInExpressionParts(node) {
         if (
-            ts.isLiteralExpression(node) ||
+            isLiteralExpression(node) ||
+            tsutils.isBooleanLiteral(node) ||
             ts.isIdentifier(node) ||
+            // TODO: ts.isFunctionLike でまとめて判定できそうだけど誤判定が怖い
             ts.isFunctionExpression(node) ||
             ts.isArrowFunction(node)
         ) {
@@ -168,7 +147,7 @@ function isPure(expression) {
             ts.isObjectLiteralExpression(node) ||
             ts.isArrayLiteralExpression(node) ||
             ts.isVoidExpression(node) ||
-            // TODO: 副作用があるかもしれないのは heritageClauses と static メンバーのみ
+            // TODO: heritageClauses と static メンバーのみチェックする
             ts.isClassExpression(node) ||
             ts.isPrefixUnaryExpression(node) ||
             ts.isPostfixUnaryExpression(node) ||
@@ -188,68 +167,10 @@ function isPure(expression) {
     }
     return findImpureExpressionInExpressionParts(expression) === undefined;
 }
-
-/**
- * 実行される可能性のあるノードをたどっていく。途中で変数宣言に出会ったら収集する。
- * @param {ts.Node} node
- * @param {ReadonlyMap<ts.Identifier, tsutils.VariableInfo>} usages 宣言から変数へのマッピングと変数から宣言へのマッピングの両方を含む必要がある。
- * @param {Set<ts.Identifier>} seen 実行される可能性がある変数宣言が格納される変数
- */
-function propagateUsages(node, usages, seen) {
-    // 関数宣言は実行されない可能性があるのでスキップする
-    // `function …`
-    if (ts.isFunctionDeclaration(node)) {
-        return;
-    }
-    // catch 節を除く変数宣言は、右辺が純粋で変数が変更されないなら実行されない可能性があるのでスキップする
-    // `var …`, `let …`, `const …`, `for (…;;) …`, `for (… of …) …`, `for (… in …) …`
-    if (
-        ts.isVariableDeclaration(node) &&
-        !ts.isCatchClause(node.parent) &&
-        // TODO: `let {…} …` などを最適化の対象とする
-        ts.isIdentifier(node.name) &&
-        isNoAssign(node.name, usages) &&
-        (node.initializer === undefined || isPure(node.initializer))
-    ) {
-        return;
-    }
-
-    // 識別子が参照なら宣言をたどる
-    // `f(); function f() {}`, `const x = {}; x` など
-    if (ts.isIdentifier(node)) {
-        const usage = usages.get(node);
-        if (usage) {
-            for (const declaration of usage.declarations) {
-                propagateUsagesInDeclarationBody(declaration, usages, seen);
-            }
-        }
-        return;
-    }
-
-    // 子要素をたどる
-    ts.forEachChild(node, (child) => propagateUsages(child, usages, seen));
-}
-/**
- * @param {ts.Identifier} declaration
- * @param {ReadonlyMap<ts.Identifier, tsutils.VariableInfo>} usages
- * @param {Set<ts.Identifier>} seen
- */
-function propagateUsagesInDeclarationBody(declaration, usages, seen) {
-    if (seen.has(declaration)) return;
-    seen.add(declaration);
-
-    const { parent } = declaration;
-
-    if (ts.isFunctionDeclaration(parent) || ts.isVariableDeclaration(parent)) {
-        ts.forEachChild(parent, (child) =>
-            propagateUsages(child, usages, seen)
-        );
-    }
-}
 /**
  * @param {ts.SourceFile} sourceFile
  */
-function getUsedDeclarations(sourceFile) {
+function collectVariableUsages(sourceFile) {
     // 宣言から変数へのマッピングのみを含むので
     const variableUsages = tsutils.collectVariableUsage(sourceFile);
 
@@ -259,11 +180,75 @@ function getUsedDeclarations(sourceFile) {
             variableUsages.set(use.location, usage);
         }
     }
+    return variableUsages;
+}
+
+/**
+ * @param {ts.SourceFile} sourceFile
+ */
+function getUsedDeclarations(sourceFile) {
+    const usages = collectVariableUsages(sourceFile);
 
     /** @type {Set<ts.Identifier>} */
     const usedDeclarations = new Set();
-    propagateUsages(sourceFile, variableUsages, usedDeclarations);
 
+    /**
+     * 実行される可能性のあるノードをたどっていく。途中で宣言に出会ったら収集する。
+     * @param {ts.Node} node
+     */
+    function propagateRootUsages(node) {
+        // 関数宣言は実行されない可能性があるのでスキップする
+        // `function …`
+        if (ts.isFunctionDeclaration(node)) {
+            return;
+        }
+        // catch 節を除く変数宣言は、右辺が純粋で変数が変更されないなら実行されない可能性があるのでスキップする
+        // `var …`, `let …`, `const …`, `for (…;;) …`, `for (… of …) …`, `for (… in …) …`
+        if (
+            ts.isVariableDeclaration(node) &&
+            !ts.isCatchClause(node.parent) &&
+            // TODO: `let {…} …` などを最適化の対象とする
+            ts.isIdentifier(node.name) &&
+            (node.initializer === undefined || isPure(node.initializer))
+        ) {
+            return;
+        }
+
+        // 識別子が参照なら宣言をたどる
+        // `f(); function f() {}`, `const x = {}; x` など
+        if (ts.isIdentifier(node)) {
+            const usage = usages.get(node);
+            if (usage) {
+                for (const declaration of usage.declarations) {
+                    propagateRootUsagesInDeclarationBody(declaration);
+                }
+            }
+            return;
+        }
+
+        // 子要素をたどる
+        ts.forEachChild(node, propagateRootUsages);
+    }
+    /**
+     * @param {ts.Identifier} declaration
+     */
+    function propagateRootUsagesInDeclarationBody(declaration) {
+        if (usedDeclarations.has(declaration)) {
+            return;
+        }
+        usedDeclarations.add(declaration);
+
+        const { parent } = declaration;
+
+        if (
+            ts.isFunctionDeclaration(parent) ||
+            ts.isVariableDeclaration(parent)
+        ) {
+            ts.forEachChild(parent, propagateRootUsages);
+        }
+    }
+
+    propagateRootUsages(sourceFile);
     return usedDeclarations;
 }
 
