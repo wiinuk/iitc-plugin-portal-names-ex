@@ -318,6 +318,20 @@ function getUsedDeclarations(sourceFile) {
     return usedDeclarations;
 }
 
+/** @type {never[][]} */
+const listCache = [];
+function rentList() {
+    return listCache.pop() ?? [];
+}
+/**
+ * @template T
+ * @param {T[]} list
+ */
+function returnList(list) {
+    list.length = 0;
+    listCache.push(/** @type {never[]} */ (list));
+}
+
 /** @type {ts.TransformerFactory<ts.SourceFile>} */
 function createUnusedDeclarationRemover(context) {
     return (sourceFile) => {
@@ -326,8 +340,8 @@ function createUnusedDeclarationRemover(context) {
         /**
          * @param {ts.Node} node
          */
-        function visitor(node) {
-            node = ts.visitEachChild(node, visitor, context);
+        function visitNode(node) {
+            node = ts.visitEachChild(node, visitNode, context);
 
             // 使われていない関数宣言を取り除く
             if (
@@ -337,43 +351,83 @@ function createUnusedDeclarationRemover(context) {
             ) {
                 return undefined;
             }
-            // 使われていない単純な変数宣言を取り除く
-            // 不正な構文である `var;` や `for (var;…;…) …` になってしまうので
-            if (
-                ts.isVariableDeclaration(node) &&
-                // TODO: `let {…} …` などを対象とする
-                ts.isIdentifier(node.name) &&
-                (ts.isVariableStatement(node.parent.parent) ||
-                    ts.isForStatement(node.parent.parent)) &&
-                !usedDeclarations.has(node.name)
-            ) {
+            // 使われていない変数宣言を取り除く
+            if (ts.isVariableStatement(node)) {
+                return visitVariableStatement(node);
+            }
+            if (ts.isForStatement(node)) {
+                return visitForStatement(node);
+            }
+            return node;
+        }
+        /**
+         * @param {ts.VariableStatement} node
+         */
+        function visitVariableStatement(node) {
+            let newDeclarationList = visitVariableDeclarationList(
+                node.declarationList
+            );
+            if (newDeclarationList === undefined) {
                 return undefined;
             }
-            // ここで `var;` を削除する
+            return context.factory.updateVariableStatement(
+                node,
+                node.modifiers,
+                newDeclarationList
+            );
+        }
+        /**
+         * @param {ts.ForStatement} node
+         */
+        function visitForStatement(node) {
             if (
-                ts.isVariableStatement(node) &&
-                node.declarationList.declarations.length === 0
-            ) {
-                return undefined;
-            }
-            // ここで `for(var;…;…) …` を `for(;…;…) …` にする
-            if (
-                ts.isForStatement(node) &&
                 node.initializer !== undefined &&
-                ts.isVariableDeclarationList(node.initializer) &&
-                node.initializer.declarations.length === 0
+                ts.isVariableDeclarationList(node.initializer)
             ) {
+                const initializer = visitVariableDeclarationList(
+                    node.initializer
+                );
                 return context.factory.updateForStatement(
                     node,
-                    undefined,
+                    initializer,
                     node.condition,
                     node.incrementor,
                     node.statement
                 );
             }
-            return node;
         }
-        return ts.visitNode(sourceFile, visitor);
+        /**
+         * @param {ts.VariableDeclarationList} node
+         */
+        function visitVariableDeclarationList(node) {
+            let modified = false;
+            /** @type {ts.VariableDeclaration[]} */
+            let newDeclarations = rentList();
+            try {
+                for (let child of node.declarations) {
+                    // TODO: `let {…} …` などを対象とする
+                    if (
+                        ts.isIdentifier(child.name) &&
+                        !usedDeclarations.has(child.name)
+                    ) {
+                        modified = true;
+                    } else {
+                        (newDeclarations ??= []).push(child);
+                    }
+                }
+                if (newDeclarations.length === 0) {
+                    return undefined;
+                }
+
+                return context.factory.updateVariableDeclarationList(
+                    node,
+                    modified ? newDeclarations : node.declarations
+                );
+            } finally {
+                returnList(newDeclarations);
+            }
+        }
+        return ts.visitNode(sourceFile, visitNode);
     };
 }
 
