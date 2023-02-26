@@ -1,5 +1,6 @@
 //@ts-check
 const UserScriptPlugin = require("./webpack-user-script-plugin");
+const UserScriptMinimizerPlugin = require("./webpack-user-script-minimizer-plugin");
 const TypedCssModulePlugin = require("./webpack-typed-css-module-plugin");
 const { name: packageName } = require("./package.json");
 const webpack = require("webpack");
@@ -29,7 +30,8 @@ const config = {
         extensions: [".ts", ".tsx", ".js", ".jsx", ".json"],
     },
     optimization: {
-        minimize: false,
+        minimize: true,
+        minimizer: [new UserScriptMinimizerPlugin()],
     },
     output: {
         path: __dirname,
