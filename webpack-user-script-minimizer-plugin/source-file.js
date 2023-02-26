@@ -53,11 +53,12 @@ function collectVariableUsages(sourceFile) {
 function getUsedDeclarations(sourceFile) {
     const usages = collectVariableUsages(sourceFile);
 
-    const evaluateFailure = Symbol("evaluationFailure");
+    const evaluationFailure = Symbol("evaluationFailure");
     /**
      * @param {ts.Expression} node
+     * @returns {undefined | null | boolean | number | bigint | typeof evaluationFailure}
      */
-    function simpleEvaluate(node) {
+    function evaluateSimple(node) {
         if (
             ts.isIdentifier(node) &&
             node.text === "undefined" &&
@@ -77,7 +78,27 @@ function getUsedDeclarations(sourceFile) {
         if (ts.isBigIntLiteral(node)) {
             return BigInt(node.text);
         }
-        return evaluateFailure;
+        if (ts.isBinaryExpression(node)) {
+            switch (node.operatorToken.kind) {
+                // `l || r`, `l && r`
+                case ts.SyntaxKind.BarBarToken:
+                case ts.SyntaxKind.AmpersandAmpersandToken: {
+                    const l = evaluateSimple(node.left);
+                    if (l === evaluationFailure) {
+                        return evaluationFailure;
+                    }
+                    if (
+                        node.operatorToken.kind === ts.SyntaxKind.BarBarToken
+                            ? !!l
+                            : !l
+                    ) {
+                        return l;
+                    }
+                    return evaluateSimple(node.right);
+                }
+            }
+        }
+        return evaluationFailure;
     }
 
     /**
@@ -142,8 +163,8 @@ function getUsedDeclarations(sourceFile) {
             return e;
         }
 
-        const l = simpleEvaluate(node.left);
-        if (l !== evaluateFailure) {
+        const l = evaluateSimple(node.left);
+        if (l !== evaluationFailure) {
             // `l || …` は l が純粋で truthy なら全体として純粋
             // `l && …` は l が純粋で falsy なら全体として純粋
             if (
